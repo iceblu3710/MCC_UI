@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCC Viewer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #f5f5f5; }
+    header { background: #1976d2; color: white; padding: 1rem; font-weight: bold; font-size: 1.2rem; display: flex; justify-content: space-between; align-items: center; }
+    .container { display: flex; overflow-x: scroll; height: calc(100vh - 180px); scroll-behavior: smooth; position: relative; }
+    .column { min-width: 140px; margin: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1); padding: 0.5rem; opacity: 0.3; transition: opacity 0.3s ease; position: relative; }
+    .column.focused { opacity: 1; box-shadow: 0 0 0 3px #2196f3; }
+    .col-label { position: absolute; top: -1.2rem; left: 50%; transform: translateX(-50%); font-size: 0.9rem; font-weight: bold; color: #444; }
+    .search-bar { display: flex; padding: 0.5rem; background: #eeeeee; }
+    .search-bar input { flex: 1; padding: 0.5rem; font-size: 1rem; }
+    .nav-zone { position: fixed; top: 50%; transform: translateY(-50%); width: 10%; height: 50%; z-index: 10; }
+    .nav-left { left: 0; }
+    .nav-right { right: 0; }
+    .padding-column { min-width: 40vw; pointer-events: none; }
+    .mcc-select { padding: 0.25rem; margin: 0.25rem; font-size: 1rem; width: calc(100% - 0.5rem); }
+    .popup { position: fixed; left: 0; right: 0; bottom: 0; background: white; border-top: 2px solid #ccc; box-shadow: 0 -2px 10px rgba(0,0,0,0.15); padding: 1rem; max-height: 40vh; overflow-y: auto; display: none; z-index: 99; }
+    .popup h3 { margin-top: 0; font-size: 1.1rem; display: flex; justify-content: space-between; align-items: center; }
+    .popup h3 button { background: transparent; border: none; font-size: 1.2rem; cursor: pointer; color: #888; }
+    .popup p { font-size: 0.9rem; margin: 0.3rem 0; }
+    .bucket { 
+      background: #c8e6c9; 
+      border-radius: 4px; 
+      margin-bottom: 4px; 
+      text-align: center; 
+      cursor: pointer; 
+      position: relative; 
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .bucket .tag { 
+      font-weight: bold; 
+      font-size: 0.95rem; 
+      padding: 0.25rem;
+    }
+    .bucket .desc { 
+      font-size: 0.8rem; 
+      color: #444; 
+      padding: 0.25rem;
+    }
+    .bucket.spare { background: #a0a0a0; color: white; }
+    .empty { background: #ccc; opacity: 0.6; }
+    .file-loader {padding: 0.5rem; background: #eeeeee; display: flex; justify-content: center; }
+  </style>
+</head>
+<body>
+    <div id="file-loader" class="file-loader">
+        <input type="file" id="file-input" accept=".xlsx" />
+      </div>
+  <select class="mcc-select" id="mcc-select"><option>Select MCC...</option></select>
+  <!-- <div class="search-bar">
+    <div style="position: relative; flex: 1; display: flex;">
+      <input type="text" placeholder="Search TAG..." id="search-input" style="width: 100%; padding-right: 2rem;" />
+      <button id="search-button" style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 1.2rem;">🔍</button>
+    </div>
+  </div> -->
+  <div class="search-bar" style="height: 2.25rem; align-items: center; background: #eeeeee; padding: 0 0.25rem;">
+    <div style="position: relative; flex: 1; display: flex;">
+      <input type="text" $1 style="width: 100%; padding: 0.25rem 2rem 0.25rem 0.5rem; font-size: 0.9rem;" />
+      <button id="search-button" style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 1rem; line-height: 1;">🔍</button>
+    </div>
+  </div>
+  <div class="container" id="mcc-container"></div>
+  <div class="nav-zone nav-left"></div>
+  <div class="nav-zone nav-right"></div>
+
+  <script>
+    const container = document.getElementById('mcc-container');
+    const popup = document.getElementById('info-popup');
+    const mccSelect = document.getElementById('mcc-select');
+    let allEntries = [], currentMCC = '', columns = [], currentIndex = 0, sectionHeights = {};
+ 
+
+    document.addEventListener('click', e => {
+        const popup = document.getElementById('info-popup');
+        if (!popup) return;
+
+        const isInsidePopup = popup.contains(e.target);
+        const isBucket = e.target.closest('.bucket');
+
+        if (!isInsidePopup && !isBucket) {
+            popup.style.display = 'none';
+        }
+    });
+  
+    document.getElementById('file-input').addEventListener('change', async e => {
+      const file = e.target.files[0];
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet);
+      allEntries = rows.filter(r => r.MCC_PNL);
+      const mccs = [...new Set(allEntries.map(r => r.MCC_PNL))];
+      mccSelect.innerHTML = '<option>Select MCC...</option>' + mccs.map(m => `<option value="${m}">${m}</option>`).join('');
+      document.querySelector('.file-loader').style.display = 'none';
+    });
+  
+    mccSelect.addEventListener('change', () => {
+      currentMCC = mccSelect.value;
+      const relevant = allEntries.filter(r => r.MCC_PNL === currentMCC);
+      const sectionMap = {};
+      sectionHeights = {};
+      relevant.forEach(row => {
+        const sec = parseInt(row.MCC_Section);
+        const height = parseInt(row.MCC_Space) || 1;
+        if (!sectionMap[sec]) sectionMap[sec] = [];
+        sectionMap[sec].push(row);
+        sectionHeights[sec] = Math.max(sectionHeights[sec] || 0, parseInt(row.MCC_Position) + height - 1);
+      });
+      const sorted = Object.entries(sectionMap).sort((a, b) => a[0] - b[0]);
+      window.data = sorted.map(([sec, rows]) => {
+        const maxHeight = sectionHeights[sec];
+        const col = Array.from({ length: maxHeight }, () => null);
+        rows.forEach(r => {
+          const start = parseInt(r.MCC_Position) - 1;
+          const height = parseInt(r.MCC_Space) || 1;
+          col[start] = { ...r, __height: height };
+          for (let i = 1; i < height; i++) col[start + i] = '__occupied';
+        });
+        return col;
+      });
+      renderColumns();
+    });
+  
+    function renderColumns() {
+        container.innerHTML = ''; columns = [];
+        const padLeft = document.createElement('div'); padLeft.className = 'padding-column'; container.appendChild(padLeft);
+        data.forEach((columnData, i) => {
+            const col = document.createElement('div');
+            col.classList.add('column');
+            if (i === 0) col.classList.add('focused');
+            const label = document.createElement('div');
+            label.className = 'col-label';
+            label.textContent = `Col ${i + 1}`;
+            col.appendChild(label);
+
+            const totalSpaces = columnData.length;
+            const visibleHeight = container.clientHeight - 32 - (totalSpaces - 1) * 4;
+            const unitHeight = visibleHeight / totalSpaces;
+
+            for (let j = 0; j < totalSpaces; j++) {
+            const entry = columnData[j];
+            if (entry === '__occupied') continue;
+            const div = document.createElement('div');
+            div.style.height = `${unitHeight * ((entry && entry.__height) || 1)}px`;
+            div.style.marginBottom = '4px';
+
+            if (entry) {
+                div.classList.add('bucket');
+                if ((entry.TAG || '').toLowerCase().includes('spare')) div.classList.add('spare');
+                div.setAttribute('data-tag', entry.TAG || '');
+                div.innerHTML = `<div class="tag">${entry.TAG || ''}</div><div class="desc">${entry.Description || ''}</div>`;
+                div.addEventListener('click', () => showPopup(entry, i));
+            } else {
+                div.classList.add('empty');
+            }
+
+            col.appendChild(div);
+            }
+
+            container.appendChild(col);
+            columns.push(col);
+        });
+        const padRight = document.createElement('div'); padRight.className = 'padding-column'; container.appendChild(padRight);
+        updateFocus();
+        }
+  
+    function updateFocus() {
+      columns.forEach((col, i) => col.classList.toggle('focused', i === currentIndex));
+      columns[currentIndex]?.scrollIntoView({ behavior: 'smooth', inline: 'center' });
+    }
+  
+    function navigate(direction) {
+      const newIndex = currentIndex + direction;
+      if (newIndex >= 0 && newIndex < columns.length) {
+        currentIndex = newIndex;
+        updateFocus();
+      }
+    }
+  
+    document.querySelector('.nav-left').addEventListener('click', () => navigate(-1));
+    document.querySelector('.nav-right').addEventListener('click', () => navigate(1));
+    container.addEventListener('wheel', e => { if (e.deltaX > 20) navigate(1); else if (e.deltaX < -20) navigate(-1); });
+
+  
+    function showPopup(data, colIndex) {
+        if (colIndex !== currentIndex) {
+            currentIndex = colIndex;
+            updateFocus();
+        }
+
+        const popup = document.getElementById('info-popup');
+        if (!popup) return;
+
+        popup.innerHTML = `<h3>${data.TAG || 'Details'}<button onclick="document.getElementById('info-popup').style.display='none'">&times;</button></h3>`;
+        Object.entries(data).forEach(([key, val]) => {
+            if (val && String(val).trim()) {
+            popup.innerHTML += `<p><strong>${key}:</strong> ${val}</p>`;
+            }
+        });
+        popup.style.display = 'block';
+    }
+
+    function executeSearch() {
+        const term = document.getElementById('search-input').value.toLowerCase();
+        for (let i = 0; i < columns.length; i++) {
+            const match = Array.from(columns[i].querySelectorAll('.bucket')).find(b => b.dataset.tag.toLowerCase().includes(term));
+            if (match) {
+            currentIndex = i;
+            updateFocus();
+            match.style.outline = '2px dashed red';
+            setTimeout(() => (match.style.outline = ''), 1500);
+            break;
+            }
+        }
+    }
+
+    document.getElementById('search-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') executeSearch();
+    });
+
+    document.getElementById('search-button').addEventListener('click', () => executeSearch());
+
+
+
+    </script>
+
+  <div class="popup" id="info-popup" style="z-index: 999;"></div>
+</body>
+</html>
